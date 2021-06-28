@@ -1,0 +1,40 @@
+---
+title: "project_course_2"
+author: "Archel"
+date: "6/28/2021"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+```
+
+```{r}
+raw_data <- read.csv('./datasciencecoursera/Reproducible Research/repdata_data_StormData.csv.bz2')
+str(raw_data)
+```
+
+```{r}
+# cast date column as datetime
+raw_data$BGN_DATE <- as.Date(raw_data$BGN_DATE, format='%m/%d/%Y')
+subset_data <- select(raw_data, BGN_DATE, EVTYPE, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP, FATALITIES, INJURIES)
+subset_data$year <- year(subset_data$BGN_DATE)
+subset_data <- subset(subset_data, year >= 1996)
+subset_data <- subset(subset_data, PROPDMG >= 1 | CROPDMG >= 1 | FATALITIES >= 1 | INJURIES >= 1)
+```
+
+```{r}
+table(subset_data$PROPDMGEXP)
+```
+```{r}
+table(subset_data$CROPDMGEXP)
+```
+```{r}
+subset_data$CROPDMGVAL[(subset_data$CROPDMGEXP == '')] <- 10^0
+
+```
+```{r}
+sum(subset_data$CROPDMGEXP=='')
+```
