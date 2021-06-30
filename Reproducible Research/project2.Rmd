@@ -5,36 +5,124 @@ date: "6/28/2021"
 output: html_document
 ---
 
+# Reproducible Research Course Project 2: Extreme Weather Events Impact on Public Health & Economy 
+
+## Synopsis
+There were numbers of severe weather events & storms in the U.S. These heavily affected both the level of well-being and economy of the Americans. The data is taken from the NOAA (National Oceanic and Atmospheric Administration) and can be downloaded from this [link](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2). This data describes the content on storms and other weather events in the U.S (including the time & place) and also the estimates of any fatalities, injuries, and property damage.
+
+## Data Processing
+Before we start, let's import the libraries used in this project.
 ```{r}
 library(ggplot2)
 library(dplyr)
 library(lubridate)
 ```
 
+
+If you have downloaded the dataset, we can directly load it. More info can be found on this [link](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) and this [link](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf)
 ```{r}
-raw_data <- read.csv('./datasciencecoursera/Reproducible Research/repdata_data_StormData.csv.bz2')
+raw_data <- read.csv('./repdata_data_StormData.csv.bz2')
 str(raw_data)
 ```
-
+Now we can clearly see that there are over 900,000 number of observations (rows) of data and 37 variables (columns). However, we will not be using all columns as the relevant analysis only includes date (`BGN_DATE`), event types (`EVTYPE`), `FATALITIES`, `INJURIES`, `PROPDMG`, `PROPDMGEXP`, `CROPDMG`, `CROPDMGEXP`. If you open one of those links I mentioned above, all of the 48 event types occur during and after 1996. This means that the years before that are not related to our task.   
 ```{r}
 # cast date column as datetime
 raw_data$BGN_DATE <- as.Date(raw_data$BGN_DATE, format='%m/%d/%Y')
+# include only the related columns to observe health and economy impact
 subset_data <- select(raw_data, BGN_DATE, EVTYPE, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP, FATALITIES, INJURIES)
+# subset data >= 1996
 subset_data$year <- year(subset_data$BGN_DATE)
 subset_data <- subset(subset_data, year >= 1996)
+# some of the values on PROPDMG, CROPDMG, FATALITIES, and INJURIES are 0, filter them out to get the data we wanted
 subset_data <- subset(subset_data, PROPDMG >= 1 | CROPDMG >= 1 | FATALITIES >= 1 | INJURIES >= 1)
 ```
 
+Interestingly, columns like `PROPDMG` and `CROPDMG` contain non-numeric values. Intuitively, these values represent the values in the order of "thousands".
+- '' -> 0
+- 'K' -> 1,000
+- 'M' -> 1,000,000
+- 'B' -> 1,000,000,000
+First, let's look at `PROPDMGEXP` column
 ```{r}
-table(subset_data$PROPDMGEXP)
+unique(subset_data$PROPDMGEXP)
 ```
+Same thing as the `CROPDMGEXP` column
 ```{r}
-table(subset_data$CROPDMGEXP)
+unique(subset_data$CROPDMGEXP)
 ```
+Simply just fill in the "real numeric" values according to the categories ('', 'B', 'K', or 'M')
 ```{r}
 subset_data$CROPDMGVAL[(subset_data$CROPDMGEXP == '')] <- 10^0
+subset_data$CROPDMGVAL[(subset_data$CROPDMGEXP == 'B')] <- 10^9
+subset_data$CROPDMGVAL[(subset_data$CROPDMGEXP == 'K')] <- 10^3
+subset_data$CROPDMGVAL[(subset_data$CROPDMGEXP == 'M')] <- 10^6
 
+subset_data$PROPDMGVAL[(subset_data$PROPDMGEXP == '')] <- 10^0
+subset_data$PROPDMGVAL[(subset_data$PROPDMGEXP == 'B')] <- 10^9
+subset_data$PROPDMGVAL[(subset_data$PROPDMGEXP == 'K')] <- 10^3
+subset_data$PROPDMGVAL[(subset_data$PROPDMGEXP == 'M')] <- 10^6
+```
+
+When observing extreme weather events on health impact, we can divide it into `FATALITIES` and `INJURIES` as they are closely related to "health". The same goes to economic impact. We can take `PROPDMG` and `CROPDMG` to estimate it. From here, we could do a process called **feature engineering** to generate a new variable based on the existing and related variables.
+```{r}
+subset_data <- mutate(subset_data, health_impact = FATALITIES + INJURIES)
+subset_data <- mutate(subset_data, eco_impact = PROPDMG*PROPDMGVAL + CROPDMG*CROPDMGVAL)
+```
+
+There is one more thing. The problem with this dataset is that according to NOAA, only 48 events are available on its website. In our case, there are still 219 number of events. Let's examine the exact problem.
+```{r}
+events <- unique(subset_data$EVTYPE)
+print(dim(table(events)))
+```
+If we only look at the "Thunder" events, we do not only see "THUNDERSTORM" but also other events that have "Thunder" in them.
+```{r}
+events[grep('THUNDER', events)]
+```
+Unifying all of them is a bit of a hassle. **Our goal is to only analyze the most harmful events**. To simplify this, we only clean the events in the 95th percentile.
+```{r}
+subset_health <- with(subset_data, aggregate(health_impact ~ EVTYPE, FUN=sum))
+subset(subset_health, health_impact > quantile(health_impact, prob=.95))
 ```
 ```{r}
-sum(subset_data$CROPDMGEXP=='')
+subset_health <- with(subset_data, aggregate(eco_impact ~ EVTYPE, FUN=sum))
+subset(subset_health, eco_impact > quantile(eco_impact, prob=.95))
 ```
+
+In the 95th percentile, "HURRICANE/TYPHOON", "TSTM WIND", "HURRICANE", and "STORM SURGE" appears in the table. We need to unify them by replacing those words into something universal like "THUNDERSTORM WIND", "HURRICANE (TYPHOON)", and "STORM SURGE/TIDE"
+```{r}
+subset_data$EVTYPE[(subset_data$EVTYPE=='TSTM WIND')] <- 'THUNDERSTORM WIND'
+subset_data$EVTYPE[(subset_data$EVTYPE=='HURRICANE/TYPHOON')] <- 'HURRICANE (TYPHOON)'
+subset_data$EVTYPE[(subset_data$EVTYPE=='HURRICANE')] <- 'HURRICANE (TYPHOON)'
+subset_data$EVTYPE[(subset_data$EVTYPE=='STORM SURGE')] <- 'STORM SURGE/TIDE'
+```
+
+
+## Results
+Finally, plot the "cleaned" data grouped by the weather events in a descending order for health impact.
+```{r}
+health_plot <- subset_data %>% group_by(EVTYPE) %>% summarise(health_impact = sum(health_impact)) %>%
+                arrange(desc(health_impact))
+
+ggplot(health_plot[1:10,], aes(x=reorder(EVTYPE, -health_impact), y=health_impact, color=EVTYPE)) + 
+      geom_bar(stat="identity") + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+      xlab("Event") + ylab("Number of fatalities and injuries") +
+      theme(legend.position="none") +
+      ggtitle("Biggest Health Impact in the U.S. grouped by Event Types")
+```
+We can see that 'TORNADO' had the biggest impact on people's health in the U.S.
+
+Next, plot for the economy impact
+```{r}
+eco_plot <- subset_data %>% group_by(EVTYPE) %>% summarise(eco_impact = sum(eco_impact)) %>%
+                arrange(desc(eco_impact))
+
+ggplot(eco_plot[1:10,], aes(x=reorder(EVTYPE, -eco_impact), y=eco_impact, color=EVTYPE)) + 
+      geom_bar(stat="identity") + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+      xlab("Event") + ylab("Number of fatalities and injuries") +
+      theme(legend.position="none") +
+      ggtitle("Biggest Economy Impact in the U.S. grouped by Event Types")
+```
+For the biggest economy impact, "FLOOD" tops the chart followed by "HURRICANE (TYPHOON)" and "STORM SURGE/TIDE".
+
